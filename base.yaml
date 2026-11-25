@@ -1,46 +1,43 @@
 substitutions:
-  # Daikin Altherma model
-  # Select a model from the confs/ directory (without .yaml):
-  #
-  # erga_eh_da_04_08           - ERGA D / EHV DA (4-8 kW)
-  # erga_eh_e_ej_04_08         - ERGA E / EHV E/EJ (4-8 kW)
-  # erla_d_ebsh_11_16_ech2o    - ERLA D / ECH2O (11-16 kW)
-  # altherma_ehvh_ehvx_cb      - EHVH/EHVX CB
-  # epra_d_etv_etb_etvz_14_18  - EPRA D / ETV/ETB/ETVZ
-  # erla_d_ebv_ebb_ebvz_11_16  - ERLA D / EBV/EBB/EBVZ
-  # geo3_egsah_ewsah_d_06_10  - GEO3 EGSAH/EWSAH D (6-10 kW, experimental)
-  altherma_model: erga_eh_da_04_08
-
-  # Default to GitHub for Take Control.
-  # Override with "components" for local and factory builds.
-  altherma_component_source: github://jjohnsen/esphome-altherma@main
+  # Modell aus dem confs/ Ordner wählen (ohne .yaml):
+  altherma_model: protocol_s_rotex
+  altherma_component_source: components
 
 esphome:
-  name: esphome-altherma
-  friendly_name: ESPHome Altherma
-  name_add_mac_suffix: true
+  name: rotex-hpsu
+  friendly_name: Rotex HPSU 508
+  name_add_mac_suffix: false
+
+api:
+  reboot_timeout: 0s
 
 logger:
 
-api:
-  custom_services: true
+# Webserver für direkten Browser-Zugriff über die IP-Adresse
+web_server:
+  port: 80
 
 ota:
   - platform: esphome
 
 wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
   ap:
+    ssid: "ESPHome-Altherma-Fallback"
 
 captive_portal:
 
 uart:
   id: uart_bus
-  tx_pin: GPIO17
-  rx_pin: GPIO16
+  tx_pin: D1
+  rx_pin: D2
   baud_rate: 9600
   data_bits: 8
   parity: EVEN
   stop_bits: 1
+  debug:
+    direction: BOTH
 
 external_components:
   - source: ${altherma_component_source}
@@ -53,14 +50,20 @@ altherma_hub:
   update_interval: 30s
   query_result_text_sensor: query_registry_result
 
+
 text_sensor:
   - platform: template
     name: "Manual Query Registry Result"
     id: query_registry_result
     entity_category: diagnostic
 
-packages:
-  altherma_sensors: !include confs/${altherma_model}.yaml
+mqtt:
+  broker: 192.168.178.60
+  port: 1880
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  topic_prefix: rotex-hpsu
 
-  # Optional ESP diagnostics
+packages:
+  altherma_sensors: !include confs/protocol_s_rotex.yaml
   # common_diagnostics: !include common/diagnostics.yaml

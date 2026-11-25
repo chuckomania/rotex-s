@@ -1,0 +1,104 @@
+sensor:
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Speichertemperatur (DHW)"
+    register: 0x53
+    offset: 1
+    convid: 105
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Vorlauftemperatur (Leaving Water)"
+    register: 0x53
+    offset: 3
+    convid: 105
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Rücklauftemperatur (Inlet Water)"
+    register: 0x53
+    offset: 5
+    convid: 105
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Außentemperatur"
+    register: 0x53
+    offset: 7
+    convid: 105
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Solar Kollektortemperatur"
+    register: 0x54
+    offset: 1
+    convid: 105
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Durchfluss (Flow)"
+    register: 0x55
+    offset: 1
+    convid: 101
+    datasize: 2
+    unit_of_measurement: "l/min"
+    state_class: measurement
+    accuracy_decimals: 1
+
+binary_sensor:
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Umwälzpumpe"
+    register: 0x56
+    offset: 0
+    convid: 301
+    datasize: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "3-Wege-Ventil (Warmwasser)"
+    register: 0x56
+    offset: 0
+    convid: 302
+    datasize: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Heizstab 1"
+    register: 0x56
+    offset: 1
+    convid: 301
+    datasize: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Heizstab 2"
+    register: 0x56
+    offset: 1
+    convid: 302
+    datasize: 1

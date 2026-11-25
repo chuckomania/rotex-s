@@ -27,10 +27,10 @@ sensor:
     update_interval: 60s
     entity_category: "diagnostic"
 
-  - platform: internal_temperature
-    name: "Internal Temperature"
-    update_interval: 60s
-    entity_category: "diagnostic"
+  #- platform: internal_temperature
+  #  name: "Internal Temperature"
+  # update_interval: 60s
+  #  entity_category: "diagnostic"
 
   - platform: template
     name: "Boot Count"

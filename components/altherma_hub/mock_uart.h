@@ -19,16 +19,11 @@ namespace esphome
                 generate_response(data[2]);
             }
 
-            size_t available() override {
+            int available() override {
                 return rx_buffer_.size();
             }
 
-            esphome::uart::UARTFlushResult flush() override {
-                while (!rx_buffer_.empty()) {
-                    rx_buffer_.pop();
-                }
-                return esphome::uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
-            }
+            void flush() override {}
             
             bool read_byte(uint8_t *data) {
                 if (rx_buffer_.empty())
