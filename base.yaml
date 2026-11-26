@@ -12,6 +12,7 @@ api:
   reboot_timeout: 0s
 
 logger:
+  baud_rate: 0
 
 # Webserver für direkten Browser-Zugriff über die IP-Adresse
 web_server:
@@ -28,16 +29,18 @@ wifi:
 
 captive_portal:
 
+logger:
+  baud_rate: 115200
+
 uart:
   id: uart_bus
-  tx_pin: D1
-  rx_pin: D2
+  tx_pin: GPIO14   # D5
+  rx_pin: GPIO12   # D6
   baud_rate: 9600
   data_bits: 8
   parity: EVEN
   stop_bits: 1
-  debug:
-    direction: BOTH
+
 
 external_components:
   - source: ${altherma_component_source}
@@ -50,6 +53,9 @@ altherma_hub:
   update_interval: 30s
   query_result_text_sensor: query_registry_result
 
+sensor:
+  - platform: uptime
+    name: "Uptime"
 
 text_sensor:
   - platform: template

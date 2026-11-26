@@ -131,11 +131,14 @@ namespace esphome
       void handle_complete_frame_();
       void fail_query_(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
       void advance_register_();
+      void begin_settle_();
+      void settle_();
 
       enum class QueryState : uint8_t {
         IDLE,
         SEND_QUERY,
         READ_RESPONSE,
+        SETTLE,  // Nachlauf der Anlage (z. B. NAK-Schwall) abwarten und verwerfen
       };
 
       std::vector<AlthermaSensorBase *> sensors_;
@@ -143,8 +146,11 @@ namespace esphome
       Converter *converter_{nullptr};
 
       static constexpr size_t RX_BUFFER_SIZE = 64;
-      static constexpr uint32_t QUERY_TIMEOUT_MS = 300;
-      static constexpr uint32_t ERROR_BACKOFF_MS = 500;
+      static constexpr uint32_t QUERY_TIMEOUT_MS = 500;
+      // Nach jeder Abfrage: warten, bis die Leitung SETTLE_QUIET_MS ruhig ist,
+      // höchstens aber SETTLE_MAX_MS. Ersetzt den früheren Fehler-Backoff.
+      static constexpr uint32_t SETTLE_QUIET_MS = 100;
+      static constexpr uint32_t SETTLE_MAX_MS = 1000;
       static constexpr size_t FRAME_HEADER_LEN = 3;  // 40 <reg> <len>
       static constexpr uint8_t FRAME_START = 0x40;
       static constexpr uint8_t FRAME_REFUSED_0 = 0x15;  // "15 EA": register not supported
@@ -158,8 +164,11 @@ namespace esphome
       size_t expected_total_{0};
       uint32_t query_started_at_{0};
       uint32_t cycle_started_at_{0};
-      bool backoff_active_{false};
-      uint32_t backoff_started_at_{0};
+      uint32_t settle_started_at_{0};
+      uint32_t last_rx_at_{0};
+      uint16_t settle_discarded_{0};
+      uint16_t nak_skipped_{0};
+      bool nak_pending_{false};  // 0x15 gelesen, 0xEA erwartet
       unsigned char rx_buffer_[RX_BUFFER_SIZE] = {0};
 
       bool manual_query_pending_{false};

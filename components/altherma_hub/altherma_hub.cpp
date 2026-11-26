@@ -4,6 +4,7 @@
 #include "labeldef.h"
 #include <cstdarg>
 #include <cstdio>
+#include <cstdint>
 LabelDef labelDefs[] = {};
 
 #ifndef USE_ESP8266
@@ -90,12 +91,6 @@ void AlthermaHub::loop() {
 
   switch (this->query_state_) {
     case QueryState::SEND_QUERY:
-      if (this->backoff_active_) {
-        if (millis() - this->backoff_started_at_ < ERROR_BACKOFF_MS) {
-          return;
-        }
-        this->backoff_active_ = false;
-      }
       if (this->manual_query_active_) {
         this->manual_query_pending_ = false;
         this->start_query_(this->manual_register_);
@@ -105,6 +100,9 @@ void AlthermaHub::loop() {
       break;
     case QueryState::READ_RESPONSE:
       this->read_response_();
+      break;
+    case QueryState::SETTLE:
+      this->settle_();
       break;
     case QueryState::IDLE:
     default:
@@ -217,15 +215,29 @@ void AlthermaHub::start_query_(uint8_t regID) {
   uart = mock_uart_();
 #endif
 
-  uint8_t command[] = {0x03, regID, 0x00};
+  // Protokoll S (wie ESPAltherma include/comm.h): 0x02, Register, CRC
+  uint8_t command[] = {0x02, regID, 0x00};
   command[2] = calculate_crc(command, 2);
 
   this->current_register_ = regID;
   this->rx_len_ = 0;
-  this->expected_total_ = 12;
-  this->query_started_at_ = millis();
+  this->nak_skipped_ = 0;
+  this->nak_pending_ = false;
+  // Protokoll S hat feste Antwortlängen je Register (inkl. Register-Byte und CRC)
+  switch (regID) {
+    case 0x50:
+      this->expected_total_ = 6;
+      break;
+    case 0x56:
+      this->expected_total_ = 4;
+      break;
+    default:
+      this->expected_total_ = 18;
+      break;
+  }
 
-  uint8_t discarded = 0;
+  // Sollte dank SETTLE normalerweise leer sein (Ausnahme: erste Abfrage eines Zyklus)
+  unsigned discarded = 0;
   uint8_t stale;
   while (uart->available() && uart->read_byte(&stale)) {
     discarded++;
@@ -235,7 +247,7 @@ void AlthermaHub::start_query_(uint8_t regID) {
   }
 
   ESP_LOGV(TAG, "Querying S-Protocol register 0x%02x... CRC: 0x%02x", regID, command[2]);
-  uart->flush();
+  this->query_started_at_ = millis();
   uart->write_array(command, 3);
   this->query_state_ = QueryState::READ_RESPONSE;
 }
@@ -247,26 +259,34 @@ void AlthermaHub::read_response_() {
 #endif
 
   while (this->rx_len_ < this->expected_total_ && uart->available() > 0) {
-    const size_t available = uart->available();
-    const size_t remaining = this->expected_total_ - this->rx_len_;
-    const size_t to_read = available < remaining ? available : remaining;
-    if (!uart->read_array(this->rx_buffer_ + this->rx_len_, to_read)) {
+    uint8_t b;
+    if (!uart->read_byte(&b)) {
       break;
     }
-    this->rx_len_ += to_read;
 
-    if (this->rx_len_ >= 2 && this->rx_buffer_[0] == FRAME_REFUSED_0) {
-      if (this->rx_buffer_[1] == FRAME_REFUSED_1) {
-        this->fail_query_("register not supported (15 EA)");
-      } else {
-        this->fail_query_("invalid response start 0x%02X 0x%02X", this->rx_buffer_[0], this->rx_buffer_[1]);
+    if (this->rx_len_ == 0) {
+      // Frame-Anfang: führende NAK-Paare "15 EA" überspringen, bis das Register-Byte kommt
+      if (this->nak_pending_) {
+        this->nak_pending_ = false;
+        if (b == FRAME_REFUSED_1) {
+          this->nak_skipped_++;
+          continue;
+        }
+        this->fail_query_("invalid response start 0x%02X 0x%02X", FRAME_REFUSED_0, b);
+        return;
       }
-      return;
+      if (b == FRAME_REFUSED_0) {
+        this->nak_pending_ = true;
+        continue;
+      }
+      if (b != this->current_register_) {
+        this->fail_query_("invalid response start byte 0x%02X (expected 0x%02X, %u NAK(s) skipped)", b,
+                          this->current_register_, (unsigned) this->nak_skipped_);
+        return;
+      }
     }
-    if (this->rx_buffer_[0] != this->current_register_ && this->rx_buffer_[0] != FRAME_REFUSED_0) {
-      this->fail_query_("invalid response start byte 0x%02X (expected 0x%02X)", this->rx_buffer_[0], this->current_register_);
-      return;
-    }
+
+    this->rx_buffer_[this->rx_len_++] = b;
   }
 
   if (this->rx_len_ == this->expected_total_) {
@@ -275,13 +295,18 @@ void AlthermaHub::read_response_() {
   }
 
   if (millis() - this->query_started_at_ > QUERY_TIMEOUT_MS) {
-    this->fail_query_("timeout waiting for response (%u of %u bytes)", (unsigned) this->rx_len_,
-                      (unsigned) this->expected_total_);
+    if (this->rx_len_ == 0 && this->nak_skipped_ > 0) {
+      this->fail_query_("register not supported (only %u NAK(s) 15 EA received)", (unsigned) this->nak_skipped_);
+    } else {
+      this->fail_query_("timeout waiting for response (%u of %u bytes, %u NAK(s) skipped)",
+                        (unsigned) this->rx_len_, (unsigned) this->expected_total_,
+                        (unsigned) this->nak_skipped_);
+    }
   }
 }
 
 void AlthermaHub::fail_query_(const char *fmt, ...) {
-  char reason[96];
+  char reason[128];
   va_list args;
   va_start(args, fmt);
   vsnprintf(reason, sizeof(reason), fmt, args);
@@ -294,9 +319,7 @@ void AlthermaHub::fail_query_(const char *fmt, ...) {
     ESP_LOGE(TAG, "Register 0x%02x: %s", this->current_register_, reason);
   }
 
-  this->backoff_active_ = true;
-  this->backoff_started_at_ = millis();
-  this->advance_register_();
+  this->begin_settle_();
 }
 
 void AlthermaHub::handle_complete_frame_() {
@@ -316,79 +339,125 @@ void AlthermaHub::handle_complete_frame_() {
     const size_t offset = static_cast<size_t>(this->manual_offset_);
     const size_t field_size = static_cast<size_t>(this->manual_datasize_);
 
-    if (this->manual_offset_ < 0 || this->manual_datasize_ <= 0 || offset >= payload_size || field_size > payload_size - offset) {
+    if (this->manual_offset_ < 0 || this->manual_datasize_ <= 0 || offset >= payload_size ||
+        field_size > payload_size - offset) {
       this->publish_manual_query_statusf_(ESPHOME_LOG_LEVEL_ERROR,
                                           "Manual query failed reg=0x%02X: offset=%d size=%d outside frame "
+                                          "(data bytes=%u)",
+                                          this->current_register_, this->manual_offset_, this->manual_datasize_,
+                                          (unsigned) payload_size);
+      this->begin_settle_();
+      return;
+    }
 
-"(data bytes=%u)",
-this->current_register_, this->manual_offset_, this->manual_datasize_,
-(unsigned) payload_size);
-this->advance_register_();
-return;
+    LabelDef label(this->manual_register_, this->manual_offset_, this->manual_convid_, this->manual_datasize_, 1,
+                   "manual_query");
+    unsigned char *input = this->rx_buffer_ + static_cast<size_t>(this->manual_offset_) + 1;
+    this->converter_->convert(&label, input);
+
+    char frame_hex[(RX_BUFFER_SIZE * 3) + 1] = {0};
+    size_t write_pos = 0;
+    for (size_t i = 0; i < this->rx_len_ && write_pos + 4 < sizeof(frame_hex); i++) {
+      int written = snprintf(frame_hex + write_pos, sizeof(frame_hex) - write_pos,
+                             (i + 1 < this->rx_len_) ? "%02X " : "%02X", this->rx_buffer_[i]);
+      if (written <= 0) {
+        break;
+      }
+      write_pos += static_cast<size_t>(written);
+    }
+    this->publish_manual_query_statusf_(ESPHOME_LOG_LEVEL_INFO, "Manual query result reg=0x%02X value=%s buffer=%s",
+                                        this->manual_register_, label.asString, frame_hex);
+    // manual_query_active_ bleibt gesetzt, advance_register_() beendet die manuelle Abfrage
+    // nach SETTLE sauber (vorher wurde hier zurückgesetzt, wodurch advance_register_()
+    // fälschlich den Register-Index des Pollzyklus weitergeschaltet hat).
+  } else {
+    LabelDef label;
+    for (auto *sensor : this->sensors_) {
+      if (sensor->registry_id() != this->current_register_) {
+        continue;
+      }
+      if (this->decode_label(sensor, this->rx_buffer_, this->rx_len_, label)) {
+        sensor->publish_state(label.asString);
+      }
+    }
+  }
+
+  auto delta = millis() - this->query_started_at_;
+  if (this->nak_skipped_ > 0) {
+    ESP_LOGD(TAG, "Query S-Protocol register 0x%02x OK CRC: 0x%02x Time: %u ms (%u NAK(s) skipped)",
+             this->rx_buffer_[0], this->rx_buffer_[this->rx_len_ - 1], (unsigned) delta,
+             (unsigned) this->nak_skipped_);
+  } else {
+    ESP_LOGD(TAG, "Query S-Protocol register 0x%02x OK CRC: 0x%02x Time: %u ms", this->rx_buffer_[0],
+             this->rx_buffer_[this->rx_len_ - 1], (unsigned) delta);
+  }
+  this->begin_settle_();
 }
-LabelDef label(
-this->manual_register_,
-this->manual_offset_,
-this->manual_convid_,
-this->manual_datasize_,
-1,
-"manual_query"
-);
-unsigned char *input = this->rx_buffer_ + static_cast<size_t>(this->manual_offset_) + 1;
-this->converter_->convert(&label, input);
-char frame_hex[(RX_BUFFER_SIZE * 3) + 1] = {0};
-size_t write_pos = 0;
-for (size_t i = 0; i < this->rx_len_ && write_pos + 4 < sizeof(frame_hex); i++) {
-int written = snprintf(frame_hex + write_pos, sizeof(frame_hex) - write_pos,
-(i + 1 < this->rx_len_) ? "%02X " : "%02X", this->rx_buffer_[i]);
-if (written <= 0) {
-break;
+
+void AlthermaHub::begin_settle_() {
+  const uint32_t now = millis();
+  this->settle_started_at_ = now;
+  this->last_rx_at_ = now;  // garantiert mindestens SETTLE_QUIET_MS Pause
+  this->settle_discarded_ = 0;
+  this->query_state_ = QueryState::SETTLE;
 }
-write_pos += static_cast<size_t>(written);
+
+void AlthermaHub::settle_() {
+  auto uart = this->parent_;
+#ifdef USE_MOCK_UART
+  uart = mock_uart_();
+#endif
+
+  uint8_t b;
+  while (uart->available() > 0 && uart->read_byte(&b)) {
+    if (this->settle_discarded_ < UINT16_MAX) {
+      this->settle_discarded_++;
+    }
+    this->last_rx_at_ = millis();
+  }
+
+  const uint32_t now = millis();
+  const bool quiet = now - this->last_rx_at_ >= SETTLE_QUIET_MS;
+  const bool expired = now - this->settle_started_at_ >= SETTLE_MAX_MS;
+  if (!quiet && !expired) {
+    return;
+  }
+
+  if (this->settle_discarded_ > 0) {
+    ESP_LOGD(TAG, "Settle after 0x%02x: discarded %u byte(s) in %u ms%s", this->current_register_,
+             (unsigned) this->settle_discarded_, (unsigned) (now - this->settle_started_at_),
+             quiet ? "" : " (max settle time reached, line not quiet)");
+  }
+  this->advance_register_();
 }
-this->publish_manual_query_statusf_(ESPHOME_LOG_LEVEL_INFO,
-"Manual query result reg=0x%02X value=%s buffer=%s",
-this->manual_register_, label.asString, frame_hex);
-this->manual_query_active_ = false;
-} else {
-LabelDef label;
-for (auto *sensor : this->sensors_) {
-if (sensor->registry_id() != this->current_register_) {
-continue;
-}
-if (this->decode_label(sensor, this->rx_buffer_, this->rx_len_, label)) {
-sensor->publish_state(label.asString);
-}
-}
-}
-auto delta = millis() - this->query_started_at_;
-ESP_LOGD(TAG, "Query S-Protocol register 0x%02x OK CRC: 0x%02x Time: %u ms",
-this->rx_buffer_[0], this->rx_buffer_[this->rx_len_ - 1], (unsigned) delta);
-this->advance_register_();
-}
+
 void AlthermaHub::advance_register_() {
-if (this->manual_query_active_ || !this->registers_.size()) {
-this->manual_query_active_ = false;
-this->poll_active_ = false;
-this->query_state_ = QueryState::IDLE;
-return;
+  if (this->manual_query_active_ || !this->registers_.size()) {
+    this->manual_query_active_ = false;
+    this->poll_active_ = false;
+    this->query_state_ = QueryState::IDLE;
+    return;
+  }
+
+  this->register_index_++;
+  if (this->register_index_ >= this->registers_.size()) {
+    this->poll_active_ = false;
+    this->query_state_ = QueryState::IDLE;
+    const auto update_delta = millis() - this->cycle_started_at_;
+    ESP_LOGD(TAG, "Update end (%u ms)", (unsigned) update_delta);
+    return;
+  }
+
+  this->query_state_ = QueryState::SEND_QUERY;
 }
-this->register_index_++;
-if (this->register_index_ >= this->registers_.size()) {
-this->poll_active_ = false;
-this->query_state_ = QueryState::IDLE;
-const auto update_delta = millis() - this->cycle_started_at_;
-ESP_LOGD(TAG, "Update end (%u ms)", (unsigned) update_delta);
-return;
-}
-this->query_state_ = QueryState::SEND_QUERY;
-}
+
 unsigned char AlthermaHub::calculate_crc(unsigned char *src, size_t len) {
-unsigned char b = 0;
-for (size_t i = 0; i < len; i++) {
-b += src[i];
+  unsigned char b = 0;
+  for (size_t i = 0; i < len; i++) {
+    b += src[i];
+  }
+  return ~b;
 }
-return ~b;
-}
+
 }  // namespace altherma_hub
-}  // nam
+}  // namespace esphome

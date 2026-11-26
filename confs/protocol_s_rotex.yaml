@@ -1,104 +1,196 @@
+# Rotex / Daikin Protokoll S
+# Zuordnung übernommen aus ESPAltherma include/def/PROTOCOL_S_ROTEX.h
+# (dort bestätigt für Rotex RDLQ014AA6V3). Offsets zählen ab dem Byte nach
+# dem Register-Byte, genau wie in ESPAltherma.
+# Antwortlängen: 0x50 -> 6, 0x56 -> 4, sonst 18 Bytes (siehe altherma_hub.cpp).
+
 sensor:
+  # --- Register 0x54: Temperaturen (Konverter 153 = unsigned / 256) ---
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Kältemittel flüssig"
+    register: 0x54
+    offset: 0
+    convid: 153
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Rücklauftemperatur"
+    register: 0x54
+    offset: 2
+    convid: 153
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Vorlauftemperatur"
+    register: 0x54
+    offset: 4
+    convid: 153
+    datasize: 2
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Temperatur D (unbekannt)"
+    register: 0x54
+    offset: 6
+    convid: 153
+    datasize: 2
+    unit_of_measurement: "°C"
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "Speichertemperatur (DHW)"
-    register: 0x53
-    offset: 1
-    convid: 105
-    datasize: 2
-    unit_of_measurement: "°C"
-    device_class: temperature
-    state_class: measurement
-    accuracy_decimals: 1
-
-  - platform: altherma_hub
-    altherma_hub_id: altherma_hub_1
-    name: "Vorlauftemperatur (Leaving Water)"
-    register: 0x53
-    offset: 3
-    convid: 105
-    datasize: 2
-    unit_of_measurement: "°C"
-    device_class: temperature
-    state_class: measurement
-    accuracy_decimals: 1
-
-  - platform: altherma_hub
-    altherma_hub_id: altherma_hub_1
-    name: "Rücklauftemperatur (Inlet Water)"
-    register: 0x53
-    offset: 5
-    convid: 105
-    datasize: 2
-    unit_of_measurement: "°C"
-    device_class: temperature
-    state_class: measurement
-    accuracy_decimals: 1
-
-  - platform: altherma_hub
-    altherma_hub_id: altherma_hub_1
-    name: "Außentemperatur"
-    register: 0x53
-    offset: 7
-    convid: 105
-    datasize: 2
-    unit_of_measurement: "°C"
-    device_class: temperature
-    state_class: measurement
-    accuracy_decimals: 1
-
-  - platform: altherma_hub
-    altherma_hub_id: altherma_hub_1
-    name: "Solar Kollektortemperatur"
     register: 0x54
-    offset: 1
-    convid: 105
+    offset: 8
+    convid: 153
     datasize: 2
     unit_of_measurement: "°C"
     device_class: temperature
     state_class: measurement
     accuracy_decimals: 1
 
+  # Vorzeichenbehaftet (103), evtl. Außentemperatur - noch unbestätigt
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Durchfluss (Flow)"
-    register: 0x55
-    offset: 1
-    convid: 101
+    name: "Temperatur F (unbekannt)"
+    register: 0x54
+    offset: 10
+    convid: 103
     datasize: 2
-    unit_of_measurement: "l/min"
+    unit_of_measurement: "°C"
     state_class: measurement
     accuracy_decimals: 1
+    entity_category: diagnostic
+
+  # Bedeutung unklar (ESPAltherma: Delta-T). Wert 26 bei Vorlauf 27,4 °C -
+  # evtl. Vorlauf-Sollwert. Mit Anzeige an der Anlage abgleichen.
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x54 Byte 12"
+    register: 0x54
+    offset: 12
+    convid: 101
+    datasize: 1
+    state_class: measurement
+    entity_category: diagnostic
+
+  # Bedeutung unklar (ESPAltherma: Sollwert Regler), bisher immer 0.
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x54 Byte 13"
+    register: 0x54
+    offset: 13
+    convid: 151
+    datasize: 1
+    state_class: measurement
+    entity_category: diagnostic
+
+  # --- Register 0x56: Bedeutung unbekannt (laut ESPAltherma "????") ---
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "Register 0x56 (unbekannt)"
+    register: 0x56
+    offset: 0
+    convid: 103
+    datasize: 2
+    state_class: measurement
+    entity_category: diagnostic
 
 binary_sensor:
+  # --- Register 0x53: Schaltzustände (Konverter 200 = ON/OFF) ---
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "Umwälzpumpe"
-    register: 0x56
+    register: 0x53
     offset: 0
-    convid: 301
+    convid: 200
     datasize: 1
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "3-Wege-Ventil (Warmwasser)"
-    register: 0x56
-    offset: 0
-    convid: 302
+    name: "Zusatzheizung"
+    register: 0x53
+    offset: 3
+    convid: 200
     datasize: 1
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Heizstab 1"
-    register: 0x56
-    offset: 1
-    convid: 301
+    name: "Vorrang Warmwasser"
+    register: 0x53
+    offset: 5
+    convid: 200
     datasize: 1
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Heizstab 2"
-    register: 0x56
-    offset: 1
-    convid: 302
+    name: "Brennersperre Solaris"
+    register: 0x53
+    offset: 6
+    convid: 200
     datasize: 1
+
+# --- Register 0x55 deaktiviert ---
+# Die HPSU 508 beantwortet 0x55 mit "15 EA" (nicht unterstützt) und schickt
+# danach viele weitere NAKs, die auch die Abfrage von 0x56 stören.
+# text_sensor:
+#   # --- Register 0x55: Betriebsart und Fehlercodes ---
+#   - platform: altherma_hub
+#     altherma_hub_id: altherma_hub_1
+#     name: "Betriebsart"
+#     register: 0x55
+#     offset: 0
+#     convid: 201
+#     datasize: 1
+#
+#   - platform: altherma_hub
+#     altherma_hub_id: altherma_hub_1
+#     name: "Fehlercode"
+#     register: 0x55
+#     offset: 1
+#     convid: 204
+#     datasize: 1
+#
+#   - platform: altherma_hub
+#     altherma_hub_id: altherma_hub_1
+#     name: "Thermo-Off-Fehler"
+#     register: 0x55
+#     offset: 2
+#     convid: 204
+#     datasize: 1
+#     entity_category: diagnostic
+#
+#   - platform: altherma_hub
+#     altherma_hub_id: altherma_hub_1
+#     name: "Warncode"
+#     register: 0x55
+#     offset: 3
+#     convid: 204
+#     datasize: 1
+#     entity_category: diagnostic
+#
+#   - platform: altherma_hub
+#     altherma_hub_id: altherma_hub_1
+#     name: "Hinweiscode"
+#     register: 0x55
+#     offset: 4
+#     convid: 204
+#     datasize: 1
+#     entity_category: diagnostic
