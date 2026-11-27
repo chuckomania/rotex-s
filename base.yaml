@@ -11,9 +11,6 @@ esphome:
 api:
   reboot_timeout: 0s
 
-logger:
-  baud_rate: 0
-
 # Webserver für direkten Browser-Zugriff über die IP-Adresse
 web_server:
   port: 80
@@ -31,15 +28,18 @@ captive_portal:
 
 logger:
   baud_rate: 115200
+  hardware_uart: UART1
 
 uart:
   id: uart_bus
-  tx_pin: GPIO14   # D5
-  rx_pin: GPIO12   # D6
+  tx_pin: GPIO15   # D5
+  rx_pin: GPIO13   # D6
   baud_rate: 9600
   data_bits: 8
   parity: EVEN
   stop_bits: 1
+  #debug:
+   #direction: BOTH
 
 
 external_components:

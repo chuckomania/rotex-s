@@ -1,14 +1,28 @@
-# Rotex / Daikin Protokoll S
-# Zuordnung übernommen aus ESPAltherma include/def/PROTOCOL_S_ROTEX.h
-# (dort bestätigt für Rotex RDLQ014AA6V3). Offsets zählen ab dem Byte nach
-# dem Register-Byte, genau wie in ESPAltherma.
+# Rotex HPSU Compact 508 – Protokoll S
+# Basis: ESPAltherma include/def/PROTOCOL_S_ROTEX.h (bestätigt für RDLQ014AA6V3),
+# angepasst an das Verhalten der HPSU 508 (siehe auch ESPAltherma Issue #551).
+# Offsets zählen ab dem Byte nach dem Register-Byte, genau wie in ESPAltherma.
 # Antwortlängen: 0x50 -> 6, 0x56 -> 4, sonst 18 Bytes (siehe altherma_hub.cpp).
+#
+# Fühlerbezeichnungen nach Daikin-Hydraulikmodul:
+#   R1T Vorlauf nach Wärmetauscher, R2T Vorlauf nach Heizstab,
+#   R3T Kältemittel flüssig, R4T Rücklauf, R5T Warmwasser
+#
+# MQTT: feste state_topics ohne Umlaute (ESPHome würde Umlaute durch _ ersetzen).
+#
+# Nicht genutzt:
+#   0x55 – von dieser Anlage nicht unterstützt (Antwort "15 EA")
+#   0x56 – liefert konstant "01 30", auch bei anderen HPSU 508 identisch
+#          -> vermutlich Gerätekennung/Softwarestand, kein Messwert
+#   0x54 Byte 10–11 – immer "01 00", vermutlich unbelegter Fühler
 
 sensor:
   # --- Register 0x54: Temperaturen (Konverter 153 = unsigned / 256) ---
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Kältemittel flüssig"
+    id: t_kaeltemittel
+    name: "Kältemittel flüssig (R3T)"
+    state_topic: rotex-hpsu/sensor/kaeltemittel_fluessig_r3t/state
     register: 0x54
     offset: 0
     convid: 153
@@ -20,7 +34,9 @@ sensor:
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Rücklauftemperatur"
+    id: t_ruecklauf
+    name: "Rücklauftemperatur (R4T)"
+    state_topic: rotex-hpsu/sensor/ruecklauf_r4t/state
     register: 0x54
     offset: 2
     convid: 153
@@ -32,7 +48,9 @@ sensor:
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Vorlauftemperatur"
+    id: t_vorlauf
+    name: "Vorlauftemperatur (R1T)"
+    state_topic: rotex-hpsu/sensor/vorlauf_r1t/state
     register: 0x54
     offset: 4
     convid: 153
@@ -44,19 +62,23 @@ sensor:
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Temperatur D (unbekannt)"
+    id: t_vorlauf_heizstab
+    name: "Vorlauf nach Heizstab (R2T)"
+    state_topic: rotex-hpsu/sensor/vorlauf_heizstab_r2t/state
     register: 0x54
     offset: 6
     convid: 153
     datasize: 2
     unit_of_measurement: "°C"
+    device_class: temperature
     state_class: measurement
     accuracy_decimals: 1
-    entity_category: diagnostic
 
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
-    name: "Speichertemperatur (DHW)"
+    id: t_speicher
+    name: "Speichertemperatur (R5T)"
+    state_topic: rotex-hpsu/sensor/speicher_r5t/state
     register: 0x54
     offset: 8
     convid: 153
@@ -66,24 +88,12 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
 
-  # Vorzeichenbehaftet (103), evtl. Außentemperatur - noch unbestätigt
-  - platform: altherma_hub
-    altherma_hub_id: altherma_hub_1
-    name: "Temperatur F (unbekannt)"
-    register: 0x54
-    offset: 10
-    convid: 103
-    datasize: 2
-    unit_of_measurement: "°C"
-    state_class: measurement
-    accuracy_decimals: 1
-    entity_category: diagnostic
-
-  # Bedeutung unklar (ESPAltherma: Delta-T). Wert 26 bei Vorlauf 27,4 °C -
-  # evtl. Vorlauf-Sollwert. Mit Anzeige an der Anlage abgleichen.
+  # Bedeutung unklar (ESPAltherma: Delta-T). Nachts höher als mittags
+  # (laut ESPAltherma ca. 36 nachts / 27 mittags). Keine Außentemperatur.
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "0x54 Byte 12"
+    state_topic: rotex-hpsu/sensor/0x54_byte_12/state
     register: 0x54
     offset: 12
     convid: 101
@@ -95,6 +105,7 @@ sensor:
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "0x54 Byte 13"
+    state_topic: rotex-hpsu/sensor/0x54_byte_13/state
     register: 0x54
     offset: 13
     convid: 151
@@ -102,22 +113,39 @@ sensor:
     state_class: measurement
     entity_category: diagnostic
 
-  # --- Register 0x56: Bedeutung unbekannt (laut ESPAltherma "????") ---
-  - platform: altherma_hub
-    altherma_hub_id: altherma_hub_1
-    name: "Register 0x56 (unbekannt)"
-    register: 0x56
-    offset: 0
-    convid: 103
-    datasize: 2
+  # --- Abgeleitete Werte ---
+  # Echte Spreizung Heizkreis (Vorlauf R1T minus Rücklauf R4T)
+  - platform: template
+    name: "Spreizung Heizkreis"
+    state_topic: rotex-hpsu/sensor/spreizung_heizkreis/state
+    unit_of_measurement: "K"
     state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      if (isnan(id(t_vorlauf).state) || isnan(id(t_ruecklauf).state)) return NAN;
+      return id(t_vorlauf).state - id(t_ruecklauf).state;
+
+  # Temperaturhub durch den Heizstab (R2T minus R1T); ~0 wenn Heizstab aus
+  - platform: template
+    id: delta_heizstab
+    name: "Temperaturhub Heizstab"
+    state_topic: rotex-hpsu/sensor/temperaturhub_heizstab/state
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 1
     entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (isnan(id(t_vorlauf_heizstab).state) || isnan(id(t_vorlauf).state)) return NAN;
+      return id(t_vorlauf_heizstab).state - id(t_vorlauf).state;
 
 binary_sensor:
   # --- Register 0x53: Schaltzustände (Konverter 200 = ON/OFF) ---
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "Umwälzpumpe"
+    state_topic: rotex-hpsu/binary_sensor/umwaelzpumpe/state
     register: 0x53
     offset: 0
     convid: 200
@@ -126,6 +154,7 @@ binary_sensor:
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "Zusatzheizung"
+    state_topic: rotex-hpsu/binary_sensor/zusatzheizung/state
     register: 0x53
     offset: 3
     convid: 200
@@ -134,6 +163,7 @@ binary_sensor:
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "Vorrang Warmwasser"
+    state_topic: rotex-hpsu/binary_sensor/vorrang_warmwasser/state
     register: 0x53
     offset: 5
     convid: 200
@@ -142,55 +172,128 @@ binary_sensor:
   - platform: altherma_hub
     altherma_hub_id: altherma_hub_1
     name: "Brennersperre Solaris"
+    state_topic: rotex-hpsu/binary_sensor/brennersperre_solaris/state
     register: 0x53
     offset: 6
     convid: 200
     datasize: 1
 
-# --- Register 0x55 deaktiviert ---
-# Die HPSU 508 beantwortet 0x55 mit "15 EA" (nicht unterstützt) und schickt
-# danach viele weitere NAKs, die auch die Abfrage von 0x56 stören.
-# text_sensor:
-#   # --- Register 0x55: Betriebsart und Fehlercodes ---
+  # Plausibilitätsprüfung zu "Zusatzheizung": Heizstab heizt, wenn R2T
+  # deutlich über R1T liegt. Schwelle ist ein Schätzwert, ggf. anpassen.
+  - platform: template
+    name: "Heizstab aktiv (berechnet)"
+    state_topic: rotex-hpsu/binary_sensor/heizstab_aktiv_berechnet/state
+    entity_category: diagnostic
+    lambda: |-
+      if (isnan(id(delta_heizstab).state)) return {};
+      return id(delta_heizstab).state > 1.5;
+    filters:
+      - delayed_on: 60s
+      - delayed_off: 60s
+
+  # --- Erkundung: übrige Bytes von 0x53 ---
+  # Bisher immer 0. Über einige Tage beobachten, welche Bytes bei
+  # Warmwasserbereitung, Abtauen, Verdichterlauf usw. umschalten.
+  # Wenn die Bedeutung klar ist: umbenennen, sonst Block wieder entfernen.
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x53 Byte 1"
+    state_topic: rotex-hpsu/binary_sensor/0x53_byte_1/state
+    register: 0x53
+    offset: 1
+    convid: 200
+    datasize: 1
+    entity_category: diagnostic
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x53 Byte 2"
+    state_topic: rotex-hpsu/binary_sensor/0x53_byte_2/state
+    register: 0x53
+    offset: 2
+    convid: 200
+    datasize: 1
+    entity_category: diagnostic
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x53 Byte 4"
+    state_topic: rotex-hpsu/binary_sensor/0x53_byte_4/state
+    register: 0x53
+    offset: 4
+    convid: 200
+    datasize: 1
+    entity_category: diagnostic
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x53 Byte 7"
+    state_topic: rotex-hpsu/binary_sensor/0x53_byte_7/state
+    register: 0x53
+    offset: 7
+    convid: 200
+    datasize: 1
+    entity_category: diagnostic
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x53 Byte 8"
+    state_topic: rotex-hpsu/binary_sensor/0x53_byte_8/state
+    register: 0x53
+    offset: 8
+    convid: 200
+    datasize: 1
+    entity_category: diagnostic
+
+  - platform: altherma_hub
+    altherma_hub_id: altherma_hub_1
+    name: "0x53 Byte 9"
+    state_topic: rotex-hpsu/binary_sensor/0x53_byte_9/state
+    register: 0x53
+    offset: 9
+    convid: 200
+    datasize: 1
+    entity_category: diagnostic
+
+# --- Optional: weitere Register testen ---
+# Zum einmaligen Ausprobieren die Einträge unten (ohne die Zeile "sensor:")
+# in die sensor:-Liste oben kopieren, flashen und ins Log schauen.
+# "register not supported" -> gibt es nicht.
+# "OK" oder "timeout (x of 18 bytes)" -> Register existiert, x = echte Länge.
+# Danach wieder entfernen (jedes Register kostet Zeit pro Zyklus).
+#
+# 0x50 enthält bei älteren Protokoll-S-Geräten Hoch-/Niederdruck (ESPAltherma PROTOCOL_S.h)
+#
+# sensor:
 #   - platform: altherma_hub
 #     altherma_hub_id: altherma_hub_1
-#     name: "Betriebsart"
-#     register: 0x55
+#     name: "Test 0x50"
+#     register: 0x50
 #     offset: 0
-#     convid: 201
-#     datasize: 1
-#
-#   - platform: altherma_hub
-#     altherma_hub_id: altherma_hub_1
-#     name: "Fehlercode"
-#     register: 0x55
-#     offset: 1
-#     convid: 204
-#     datasize: 1
-#
-#   - platform: altherma_hub
-#     altherma_hub_id: altherma_hub_1
-#     name: "Thermo-Off-Fehler"
-#     register: 0x55
-#     offset: 2
-#     convid: 204
-#     datasize: 1
+#     convid: 103
+#     datasize: 2
 #     entity_category: diagnostic
-#
 #   - platform: altherma_hub
 #     altherma_hub_id: altherma_hub_1
-#     name: "Warncode"
-#     register: 0x55
-#     offset: 3
-#     convid: 204
-#     datasize: 1
+#     name: "Test 0x51"
+#     register: 0x51
+#     offset: 0
+#     convid: 103
+#     datasize: 2
 #     entity_category: diagnostic
-#
 #   - platform: altherma_hub
 #     altherma_hub_id: altherma_hub_1
-#     name: "Hinweiscode"
-#     register: 0x55
-#     offset: 4
-#     convid: 204
-#     datasize: 1
+#     name: "Test 0x52"
+#     register: 0x52
+#     offset: 0
+#     convid: 103
+#     datasize: 2
+#     entity_category: diagnostic
+#   - platform: altherma_hub
+#     altherma_hub_id: altherma_hub_1
+#     name: "Test 0x57"
+#     register: 0x57
+#     offset: 0
+#     convid: 103
+#     datasize: 2
 #     entity_category: diagnostic
